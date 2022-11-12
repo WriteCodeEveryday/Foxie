@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
 import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:foxie/geo_utils.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_osm_plugin/flutter_osm_plugin.dart';
@@ -17,75 +17,7 @@ void main() {
   runApp(const MyApp());
 }
 
-class GeoObject {
-  double? lat;
-  double? lon;
-  double? head;
-  double? acc;
 
-  double x = 0;
-  double y = 0;
-  double z = 0;
-
-  GeoObject(lat, lon, head, acc) {
-    this.lat = lat;
-    this.lon = lon;
-    this.head = head;
-    this.acc = acc;
-
-    preComputeGrid();
-  }
-
-  GeoObject.fromList(List<String> input) {
-    if (input.length < 4) {
-      return;
-    }
-
-    lat = double.parse(input[0]);
-    lon = double.parse(input[1]);
-    head = double.parse(input[2]);
-    acc = double.parse(input[3]);
-
-    preComputeGrid();
-  }
-
-  void preComputeGrid() {
-    int R = 6371; // Approximate radius of earth in KM.
-    double latDegrees = lat! * (pi / 180.0);
-    double lonDegrees = lon! * (pi / 180.0);
-
-    x = R * cos(latDegrees) * cos(lonDegrees);
-    y = R * cos(latDegrees) * sin(lonDegrees);
-    z = R * sin(latDegrees);
-  }
-
-  @override
-  String toString() {
-    String returned = "";
-    returned += "\nlat: "  + lat.toString() + "\nlon: " + lon.toString();
-    returned += "\ndeg: " + head.toString() + "\ndir: " + bearingAsHuman();
-    returned += "\nx: " + x.toString() + "\ny: " + y.toString() + "\nz: " + z.toString();
-    return returned;
-  }
-
-  String toHumanString() {
-    String returned = "";
-    returned += lat.toString() + "," + lon.toString() + " @ " + bearingAsHuman();
-    returned += "\n[" + x.toString() + ", " + y.toString() + ", " + z.toString() + "]";
-    return returned;
-  }
-
-  String bearingAsHuman() {
-    List<String> valid = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "N"]; // LOL, North is also valid from 315 to 360... magic.
-    int value = head! ~/ 45.0;
-    String bearing = valid[value];
-    return bearing;
-  }
-
-  @override
-  bool operator ==(other) => other is GeoObject && toHumanString() == other.toHumanString();
-
-}
 Future<CompassEvent> _determineBearing() async {
   return FlutterCompass.events!.first;
 }
@@ -190,7 +122,7 @@ class _MyHomePageState extends State<MyHomePage> {
     Position gps = await _determinePosition();
     CompassEvent compass = await _determineBearing();
     return GeoObject(
-        gps.latitude, gps.longitude, compass.heading, compass.accuracy);
+        gps.latitude, gps.longitude, compass.heading ?? -1, compass.accuracy ?? -1);
   }
 
   void resetMap() {
@@ -204,7 +136,7 @@ class _MyHomePageState extends State<MyHomePage> {
       thread = FlutterCompass.events?.listen((event) async {
         Position gps = await _determinePosition();
         GeoObject obj = GeoObject(
-            gps.latitude, gps.longitude, event.heading, event.accuracy);
+            gps.latitude, gps.longitude, event.heading ?? -1, event.accuracy ?? -1);
         String newValue = obj.toString();
         setState(() {
           value = "Tap to Stop GPS Testing\n" + newValue;
@@ -231,7 +163,7 @@ class _MyHomePageState extends State<MyHomePage> {
     GeoObject obj = await getGeoObject();
     points.add(obj);
     controller.addMarker(GeoPointWithOrientation(
-        latitude: obj.lat!, longitude: obj.lon!, angle: obj.head!));
+        latitude: obj.lat, longitude: obj.lon, angle: obj.head));
 
     if (thread != null) {
       thread?.cancel();
@@ -263,9 +195,9 @@ class _MyHomePageState extends State<MyHomePage> {
   void addPointsToMap(ready) async {
     if (ready) {
       for (var element in points) {
-        controller.addMarker(GeoPointWithOrientation(latitude: element.lat!,
-            longitude: element.lon!,
-            angle: element.head!));
+        controller.addMarker(GeoPointWithOrientation(latitude: element.lat,
+            longitude: element.lon,
+            angle: element.head));
       }
     }
 
