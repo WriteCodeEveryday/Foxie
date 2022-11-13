@@ -234,6 +234,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> repaintMap() async {
     GeoObject user = await getGeoObject();
+
     flutterMap = FlutterMap(
       mapController: MapController(),
       options: MapOptions(
@@ -247,24 +248,10 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
         PolygonLayer(
           polygonCulling: false,
-          polygons: [
-            ...points.map((e) async =>
-              Polygon(
-                points: await computePolygon(e, points),
-                color: Colors.teal.shade700
-                ),
-              )
-          ],
+          polygons: await _pointsToPolygons(points),
         ),PolylineLayer(
             polylineCulling: false,
-            polylines: [
-            ...points.map((e) async =>
-              Polyline(
-                points: await computeLine(e, points),
-                color: Colors.red.shade700
-                ),
-              )
-          ]
+            polylines: await _pointsToPolylines(points)
         ),
        MarkerLayer(
           markers: [ ...points.map((e) =>
@@ -297,6 +284,46 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ]
     );
+  }
+
+  ///
+  /// Helper for converting a list of GoeObjects into
+  /// a list of polygons
+  ///
+  Future<List<Polygon>> _pointsToPolygons(List<GeoObject> points) async {
+    List<Future<Polygon>> polygonsFutures = points.map((e) async =>
+    await _geoToPolygon(e, points)).toList();
+
+    List<Polygon> outPoly = List.empty(growable: true);
+    for (Future<Polygon> ft in polygonsFutures) {
+      outPoly.add(await ft);
+    }
+    return outPoly;
+  }
+
+  Future<List<Polyline>> _pointsToPolylines(List<GeoObject> points) async {
+    List<Future<Polyline>> polyFutures = points.map((e) async =>
+    await _geoToPolyline(e, points)).toList();
+
+    List<Polyline> outPolylines = List.empty(growable: true);
+    for (Future<Polyline> ft in polyFutures) {
+      outPolylines.add(await ft);
+    }
+    return outPolylines;
+  }
+
+  Future<Polygon> _geoToPolygon(GeoObject point, List<GeoObject> points) async {
+    return Polygon(
+        points: await computeLine(point, points),
+    color: Colors.red.shade700
+    );
+  }
+
+  Future<Polyline> _geoToPolyline(GeoObject point, List<GeoObject> points) async {
+    return Polyline(
+            points: await computeLine(point, points),
+            color: Colors.red.shade700
+        );
   }
 
   void updateValue() async {
