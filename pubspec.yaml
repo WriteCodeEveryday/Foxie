@@ -31,7 +31,9 @@ dependencies:
     sdk: flutter
   geolocator: ^9.0.2
   flutter_compass: ^0.6.0
-  flutter_osm_plugin: ^0.40.3
+  latlong2: any
+  flutter_osm_plugin: ^0.40.3+2
+  flutter_map: any
   file_picker: ^5.2.2
   font_awesome_flutter : any
   permission_handler: ^10.0.0

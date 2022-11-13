@@ -5,9 +5,12 @@ import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_osm_plugin/flutter_osm_plugin.dart' show distance2point, GeoPoint;
+import 'package:foxie/main.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:flutter_osm_plugin/flutter_osm_plugin.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -27,14 +30,7 @@ class GeoObject {
   double y = 0;
   double z = 0;
 
-  GeoObject(lat, lon, head, acc) {
-    this.lat = lat;
-    this.lon = lon;
-    this.head = head;
-    this.acc = acc;
-
-    preComputeGrid();
-  }
+  GeoObject(this.lat, this.lon, this.head, this.acc);
 
   GeoObject.fromList(List<String> input) {
     if (input.length < 4) {
@@ -45,18 +41,6 @@ class GeoObject {
     lon = double.parse(input[1]);
     head = double.parse(input[2]);
     acc = double.parse(input[3]);
-
-    preComputeGrid();
-  }
-
-  void preComputeGrid() {
-    int R = 6371; // Approximate radius of earth in KM.
-    double latDegrees = lat! * (pi / 180.0);
-    double lonDegrees = lon! * (pi / 180.0);
-
-    x = R * cos(latDegrees) * cos(lonDegrees);
-    y = R * cos(latDegrees) * sin(lonDegrees);
-    z = R * sin(latDegrees);
   }
 
   @override
@@ -64,14 +48,12 @@ class GeoObject {
     String returned = "";
     returned += "\nlat: "  + lat.toString() + "\nlon: " + lon.toString();
     returned += "\ndeg: " + head.toString() + "\ndir: " + bearingAsHuman();
-    returned += "\nx: " + x.toString() + "\ny: " + y.toString() + "\nz: " + z.toString();
     return returned;
   }
 
   String toHumanString() {
     String returned = "";
     returned += lat.toString() + "," + lon.toString() + " @ " + bearingAsHuman();
-    returned += "\n[" + x.toString() + ", " + y.toString() + ", " + z.toString() + "]";
     return returned;
   }
 
@@ -127,6 +109,63 @@ Future<Position> _determinePosition() async {
   return await Geolocator.getCurrentPosition();
 }
 
+Future<double> getLargestDistance(GeoObject e, List<GeoObject> points) async {
+  double largest = 0;
+  for (var element in points) {
+    double distance = await
+    distance2point(
+        GeoPoint(longitude: e.lon!,latitude: e.lat!),
+        GeoPoint(longitude: element.lon!, latitude: element.lat!)
+    );
+
+    if (distance > largest) {
+      largest = distance;
+    }
+  }
+  return largest;
+}
+
+LatLng computeCoordinateAtDistance(GeoObject e, double head, double largest) {
+  if (head < 0) {
+    head += 360;
+  } else if (head > 360) {
+    head -= 360;
+  }
+  double R = 6738;
+  double heading = head; // 0 - north;
+  double x = sin(heading) * largest;
+  double y = cos(heading) * largest;
+
+  double lat  = e.lat!  + (y / R) * (180 / pi);
+  double lon = e.lon! + (x / R) * (180 / pi) / cos(e.lat! * pi/180);
+
+  return LatLng(lat, lon);
+}
+
+Future<List<LatLng>> computePolygon(GeoObject e, List<GeoObject> points) async {
+  List<LatLng> polygon = List.empty(growable: true);
+  polygon.add(LatLng(e.lat!, e.lon!));
+
+  double largest = await getLargestDistance(e, points) / 1000;
+
+  polygon.add(computeCoordinateAtDistance(e, e.head! - e.acc!, largest));
+  polygon.add(computeCoordinateAtDistance(e, e.head! + e.acc!, largest));
+
+  polygon.add(LatLng(e.lat!, e.lon!));
+  return polygon;
+}
+
+Future<List<LatLng>> computeLine(GeoObject e, List<GeoObject> points) async {
+  List<LatLng> line = List.empty(growable: true);
+  line.add(LatLng(e.lat!, e.lon!));
+
+  double largest = await getLargestDistance(e, points);
+  line.add(computeCoordinateAtDistance(e, e.head!, largest));
+
+  line.add(LatLng(e.lat!, e.lon!));
+  return line;
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);
 
@@ -178,12 +217,12 @@ class _MyHomePageState extends State<MyHomePage> {
   List<GeoObject> points = List.empty(growable: true);
   bool map = false;
   StreamSubscription<CompassEvent>? thread;
-  late MapController controller;
+  late FlutterMap flutterMap;
 
   @override
   void initState() {
     super.initState();
-    resetMap();
+    repaintMap();
   }
 
   Future<GeoObject> getGeoObject() async {
@@ -193,9 +232,70 @@ class _MyHomePageState extends State<MyHomePage> {
         gps.latitude, gps.longitude, compass.heading, compass.accuracy);
   }
 
-  void resetMap() {
-    controller = MapController(
-      initMapWithUserPosition: true,
+  Future<void> repaintMap() async {
+    GeoObject user = await getGeoObject();
+    flutterMap = FlutterMap(
+      mapController: MapController(),
+      options: MapOptions(
+        center: LatLng(user.lat!, user.lon!),
+        zoom: 13,
+        maxZoom: 19
+      ), nonRotatedChildren: [
+        TileLayer(
+          urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+          userAgentPackageName: 'com.foxhuntapp.foxie',
+        ),
+        PolygonLayer(
+          polygonCulling: false,
+          polygons: [
+            ...points.map((e) async =>
+              Polygon(
+                points: await computePolygon(e, points),
+                color: Colors.teal.shade700
+                ),
+              )
+          ],
+        ),PolylineLayer(
+            polylineCulling: false,
+            polylines: [
+            ...points.map((e) async =>
+              Polyline(
+                points: await computeLine(e, points),
+                color: Colors.red.shade700
+                ),
+              )
+          ]
+        ),
+       MarkerLayer(
+          markers: [ ...points.map((e) =>
+                Marker(
+                  point: LatLng(e.lat!, e.lon!),
+                  width: 24,
+                  height: 24,
+                  builder: (context) => const Icon(
+                    FontAwesomeIcons.signal,
+                    color: Colors.black,
+                    size: 24,
+                    ),
+                  ),
+                ),
+                Marker(
+                  point: LatLng(user.lat!, user.lon!),
+                  width: 24,
+                  height: 24,
+                  builder: (context) => const Icon(
+                    FontAwesomeIcons.satelliteDish,
+                    color: Colors.black,
+                    size: 24,
+                  ),
+                ),
+              ],
+        ),
+        AttributionWidget.defaultWidget(
+          source: '© OpenStreetMap via flutter_map',
+          onSourceTapped: () {}, alignment: Alignment.bottomCenter
+        ),
+      ]
     );
   }
 
@@ -220,6 +320,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void toggleMap() async {
+    await repaintMap();
     map = !map;
 
     setState(() {
@@ -230,8 +331,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void createNewPoint() async {
     GeoObject obj = await getGeoObject();
     points.add(obj);
-    controller.addMarker(GeoPointWithOrientation(
-        latitude: obj.lat!, longitude: obj.lon!, angle: obj.head!));
+    repaintMap();
 
     if (thread != null) {
       thread?.cancel();
@@ -244,64 +344,11 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void purgePoints() async {
-    resetMap();
     points.clear();
+    repaintMap();
 
     setState(() {
       value = "Points Purged.";
-    });
-  }
-
-  GeoObject calculateCenter(List<GeoObject> points) {
-    return GeoObject(1, 1, 1, 1);
-  }
-
-  int calculateSearchRadius(List<GeoObject> points) {
-    return 200;
-  }
-
-  void addPointsToMap(ready) async {
-    if (ready) {
-      for (var element in points) {
-        controller.addMarker(GeoPointWithOrientation(latitude: element.lat!,
-            longitude: element.lon!,
-            angle: element.head!));
-      }
-    }
-
-    /*
-    if (ready && points.length > 1) {
-      // Calculate center point.
-      double x = counterX / counter;
-      double y = counterY / counter;
-      double z = counterZ / counter;
-
-      // Derive the lat and long.
-      double hyp = sqrt((x * x) + (y * y));
-      double lon = atan2(y, x);
-      double lat = atan2(z, hyp);
-
-      //Convert back to degrees
-      lon = lon * (180/pi);
-      lat = lat * (180/pi);
-
-      controller.addMarker(GeoPoint(latitude: lat, longitude: lon), markerIcon: const MarkerIcon(
-        icon: Icon(
-          FontAwesomeIcons.walkieTalkie,
-          color: Colors.black,
-          size: 72,
-        ),
-      ));
-
-      double radius = (((counterX * counterX) + (counterY * counterY))/counter);
-
-      controller.drawCircle(CircleOSM(key: "transmitter",
-          centerPoint: GeoPoint(latitude: lat, longitude: lon), radius: radius,
-          color: Colors.red, strokeWidth: 10));
-    } */
-
-    setState(() {
-      value = "Points Imported.";
     });
   }
 
@@ -399,37 +446,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     child: const Text("Close Map", textAlign: TextAlign.center,
                         textScaleFactor: 1.4)),
                 Expanded(
-                  child: OSMFlutter(
-                    controller: controller,
-                    showContributorBadgeForOSM: true,
-                    onMapIsReady: addPointsToMap,
-                    markerOption: MarkerOption(
-                      defaultMarker: const MarkerIcon(
-                        icon: Icon(
-                          FontAwesomeIcons.signal,
-                          color: Colors.black,
-                          size: 96,
-                        ),
-                      ),
-                    ),
-                    userLocationMarker: UserLocationMaker(
-                      personMarker: const MarkerIcon(
-                        icon: Icon(
-                          FontAwesomeIcons.satelliteDish,
-                          color: Colors.black,
-                          size: 72,
-                        ),
-                      ), directionArrowMarker: const MarkerIcon(
-                      icon: Icon(
-                        FontAwesomeIcons.arrowUp,
-                        color: Colors.black,
-                        size: 72,
-                      ),
-                    ),
-                    ),
-                    trackMyPosition: true,
-                    initZoom: 12,
-                  ),
+                  child: flutterMap
                 )
               ] :
               (points.isNotEmpty ?
