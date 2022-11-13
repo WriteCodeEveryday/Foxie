@@ -112,8 +112,7 @@ Future<Position> _determinePosition() async {
 Future<double> getLargestDistance(GeoObject e, List<GeoObject> points) async {
   double largest = 0;
   for (var element in points) {
-    double distance = await
-    distance2point(
+    double distance = await distance2point(
         GeoPoint(longitude: e.lon!,latitude: e.lat!),
         GeoPoint(longitude: element.lon!, latitude: element.lat!)
     );
@@ -122,7 +121,7 @@ Future<double> getLargestDistance(GeoObject e, List<GeoObject> points) async {
       largest = distance;
     }
   }
-  return largest;
+  return largest / 1000;
 }
 
 LatLng computeCoordinateAtDistance(GeoObject e, double head, double largest) {
@@ -131,6 +130,7 @@ LatLng computeCoordinateAtDistance(GeoObject e, double head, double largest) {
   } else if (head > 360) {
     head -= 360;
   }
+
   double R = 6738;
   double heading = head; // 0 - north;
   double x = sin(heading) * largest;
@@ -139,6 +139,19 @@ LatLng computeCoordinateAtDistance(GeoObject e, double head, double largest) {
   double lat  = e.lat!  + (y / R) * (180 / pi);
   double lon = e.lon! + (x / R) * (180 / pi) / cos(e.lat! * pi/180);
 
+  if (lat > 90) {
+    lat -= 90;
+  } else if (lat < -90) {
+    lat += 90;
+  }
+
+  if (lon > 180) {
+    lon -= 180;
+  } else if (lon < -180) {
+    lon += 180;
+  }
+
+
   return LatLng(lat, lon);
 }
 
@@ -146,7 +159,7 @@ Future<List<LatLng>> computePolygon(GeoObject e, List<GeoObject> points) async {
   List<LatLng> polygon = List.empty(growable: true);
   polygon.add(LatLng(e.lat!, e.lon!));
 
-  double largest = await getLargestDistance(e, points) / 1000;
+  double largest = await getLargestDistance(e, points);
 
   polygon.add(computeCoordinateAtDistance(e, e.head! - e.acc!, largest));
   polygon.add(computeCoordinateAtDistance(e, e.head! + e.acc!, largest));
@@ -314,15 +327,16 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<Polygon> _geoToPolygon(GeoObject point, List<GeoObject> points) async {
     return Polygon(
-        points: await computeLine(point, points),
-    color: Colors.red.shade700
+        points: await computePolygon(point, points),
+        color: Colors.teal.shade700,
+        isFilled: true
     );
   }
 
   Future<Polyline> _geoToPolyline(GeoObject point, List<GeoObject> points) async {
     return Polyline(
             points: await computeLine(point, points),
-            color: Colors.red.shade700
+            color: Colors.red.shade700,
         );
   }
 
