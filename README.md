@@ -4,4 +4,5 @@ A Fox Hunt Assistant App
 
 ## Getting Started
 
-Not a lot of functionality right now.
+Current functionality: Log data points, import and export data.
+Testing file is available in CSV format.
