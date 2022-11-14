@@ -6,7 +6,7 @@ import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_osm_plugin/flutter_osm_plugin.dart' show distance2point, GeoPoint;
-import 'package:foxie/main.dart';
+import 'package:vector_math/vector_math.dart' show radians;
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -110,6 +110,10 @@ Future<Position> _determinePosition() async {
 }
 
 Future<double> getLargestDistance(GeoObject e, List<GeoObject> points) async {
+  if (points.length < 2) {
+    return 10;
+  } // If there's only one point, it should be 1.
+
   double largest = 0;
   for (var element in points) {
     double distance = await distance2point(
@@ -121,6 +125,7 @@ Future<double> getLargestDistance(GeoObject e, List<GeoObject> points) async {
       largest = distance;
     }
   }
+
   return largest / 1000;
 }
 
@@ -132,12 +137,12 @@ LatLng computeCoordinateAtDistance(GeoObject e, double head, double largest) {
   }
 
   double R = 6738;
-  double heading = head; // 0 - north;
+  double heading = radians(head); // 0 - north;
   double x = sin(heading) * largest;
   double y = cos(heading) * largest;
 
-  double lat  = e.lat!  + (y / R) * (180 / pi);
-  double lon = e.lon! + (x / R) * (180 / pi) / cos(e.lat! * pi/180);
+  double lat  = e.lat!  + ((y / R) * (180 / pi));
+  double lon = e.lon! + ((x / R) * (180 / pi) / cos(e.lat! * pi/180));
 
   if (lat > 90) {
     lat -= 90;
@@ -162,6 +167,7 @@ Future<List<LatLng>> computePolygon(GeoObject e, List<GeoObject> points) async {
   double largest = await getLargestDistance(e, points);
 
   polygon.add(computeCoordinateAtDistance(e, e.head! - e.acc!, largest));
+  polygon.add(computeCoordinateAtDistance(e, e.head!, largest));
   polygon.add(computeCoordinateAtDistance(e, e.head! + e.acc!, largest));
 
   polygon.add(LatLng(e.lat!, e.lon!));
@@ -326,9 +332,10 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<Polygon> _geoToPolygon(GeoObject point, List<GeoObject> points) async {
+    double opacity = (points.length > 2) ? (2 / (points.length + 1)) : 0.3;
     return Polygon(
         points: await computePolygon(point, points),
-        color: Colors.teal.shade700,
+        color: Colors.teal.withOpacity(opacity),
         isFilled: true
     );
   }
@@ -336,7 +343,10 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<Polyline> _geoToPolyline(GeoObject point, List<GeoObject> points) async {
     return Polyline(
             points: await computeLine(point, points),
-            color: Colors.red.shade700,
+            color: Colors.red,
+            borderColor: Colors.red,
+            borderStrokeWidth: 2,
+            isDotted: true
         );
   }
 
